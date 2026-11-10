@@ -10,7 +10,7 @@ import (
 
 func TestDebianMirrorFailureFallbackAndPreference(t *testing.T) {
 	old := "https://mirrors.nju.edu.cn/debian\tpriority:1\nhttps://mirrors.ustc.edu.cn/debian\tpriority:2\nhttps://deb.debian.org/debian\tpriority:3\n"
-	for _, mode := range []string{"reachable", "bookworm", "tls-failure", "nju-failure", "official", "custom", "old", "reboot", "invalid"} {
+	for _, mode := range []string{"reachable", "bookworm", "tls-failure", "nju-failure", "official", "custom", "old", "reboot", "invalid", "env", "env-invalid"} {
 		t.Run(mode, func(t *testing.T) {
 			dir := t.TempDir()
 			mirrors := filepath.Join(dir, "mirrors")
@@ -59,10 +59,16 @@ exit 0
 			run := func() ([]byte, error) {
 				cmd := exec.Command("sh", "-c", script)
 				cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "FIXTURE="+dir, "MODE="+mode)
+				switch mode {
+				case "env":
+					cmd.Env = append(cmd.Env, DebianMirrorEnv+"=official")
+				case "env-invalid":
+					cmd.Env = append(cmd.Env, DebianMirrorEnv+"=fastest")
+				}
 				return cmd.CombinedOutput()
 			}
 			out, err := run()
-			if mode == "invalid" {
+			if mode == "invalid" || mode == "env-invalid" {
 				if err == nil {
 					t.Fatal("invalid preference accepted")
 				}
@@ -78,9 +84,15 @@ exit 0
 				if got != content {
 					t.Fatal("custom source overwritten")
 				}
-			case "official", "tls-failure":
+			case "official", "tls-failure", "env":
 				if strings.Contains(got, "mirrors.") || !strings.Contains(got, "deb.debian.org") {
 					t.Fatal(got)
+				}
+				if mode == "env" {
+					// The host's measured choice is kept for later runs without the variable.
+					if saved, _ := os.ReadFile(preference); strings.TrimSpace(string(saved)) != "official" {
+						t.Fatalf("host choice not persisted: %q", saved)
+					}
 				}
 			case "nju-failure":
 				if strings.Contains(got, "mirrors.nju") || !strings.Contains(got, "mirrors.ustc") {
@@ -91,7 +103,7 @@ exit 0
 					t.Fatal(got)
 				}
 			}
-			if mode == "official" {
+			if mode == "official" || mode == "env" {
 				if probes, _ := os.ReadFile(filepath.Join(dir, "probes")); len(probes) > 0 {
 					t.Fatal("official preference contacted mirrors")
 				}

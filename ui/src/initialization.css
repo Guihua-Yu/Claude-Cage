@@ -52,3 +52,9 @@
 @keyframes initialization-enter { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
 @media (max-width: 600px) { .initialization-brand { padding: 18px 20px; } .initialization-content { width: calc(100% - 40px); margin-top: 20px; } .initialization-steps { gap: 12px; flex-wrap: wrap; font-size: 13px; margin-bottom: 26px; } .initialization h1 { font-size: 25px; } .initialization .guest-system-picker { grid-template-columns: 1fr; } .initialization .storage-actions { flex-wrap: wrap; } }
 @media (prefers-reduced-motion: reduce) { .initialization-content, .initialization-stage { animation: none; } .initialization button { transition: none; } }
+.mirror-samples { width: 100%; border-collapse: collapse; margin: 8px 0 12px; }
+.mirror-samples td { padding: 4px 8px 4px 0; border-bottom: 1px solid var(--line); }
+.mirror-samples td:last-child { text-align: right; white-space: nowrap; }
+.mirror-error { color: var(--danger, #c0392b); }
+.mirror-option { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+.mirror-option em { font-style: normal; font-size: 12px; padding: 1px 6px; border-radius: 6px; background: var(--accent-soft, rgba(0, 120, 212, 0.12)); }

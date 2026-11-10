@@ -10,6 +10,11 @@ import { SetupProgress } from "./setup-progress";
 import { DiagnosticSettings } from "./diagnostics.jsx";
 import { MacOSFirstSetup } from "./macos-first-setup";
 import { Modal } from "./modal";
+function formatSpeed(bytesPerSecond) {
+  if (!bytesPerSecond) return "—";
+  if (bytesPerSecond >= 1 << 20) return `${(bytesPerSecond / (1 << 20)).toFixed(1)} MB/s`;
+  return `${Math.round(bytesPerSecond / 1024)} KB/s`;
+}
 import { SafetyMessage } from "./safety-message";
 import { needsProxySetup } from "./onboarding-state.mjs";
 import { networkState } from "./safety-state.mjs";
@@ -60,6 +65,8 @@ function Initialization({ initial, onComplete }) {
   const [error, setError] = useState("");
   const [connectionError, setConnectionError] = useState("");
   const [git, setGit] = useState(null);
+  const [mirrors, setMirrors] = useState(null);
+  const [mirrorChoice, setMirrorChoice] = useState("");
   const [details, setDetails] = useState(false);
   const [help, setHelp] = useState(false);
   const [dialog, setDialog] = useState(null);
@@ -142,17 +149,31 @@ function Initialization({ initial, onComplete }) {
     if (!choice) return job.setup_progress?.system ? { guest_system: job.setup_progress.system } : {};
     return { guest_system: choice.guest_system, media: choice.media, sha256: choice.sha256, clone_key: choice.clone_key, editor_terms: choice.editor_terms };
   }
-  async function install() {
+  function debianGuest() {
+    const system = startOptions().guest_system || account?.guest_system || job.setup_progress?.system || "";
+    return system.startsWith("debian");
+  }
+  async function install(skipMirrors) {
     if (needsProxySetup(null, status, proxy)) { setError("请先选择并应用代理节点。"); setStep("proxy"); return; }
     await run(async () => {
       const check = await api("/host/git");
       if (!check.ready) { setGit(check); return; }
+      // Measure the Debian sources through the proxy once, before the first
+      // install; the choice is kept for later updates and maintenance.
+      if (skipMirrors !== true && debianGuest() && !status?.vm_running && !job.setup_progress) {
+        const probe = await api("/host/debian-mirrors");
+        if (!probe.decided) { setMirrors(probe); setMirrorChoice(probe.preference); return; }
+      }
       await api("/environment/initialization", { action: "install" });
       const accepted = await api("/start", startOptions());
       if (!alive.current) return;
       setGit(null); setStep("install");
       setStatus(current => ({ ...current, job: { ...accepted, running: true, kind: accepted.kind || "start", message: accepted.message || "正在准备客机环境…" } }));
     });
+  }
+  async function chooseMirror() {
+    await run(async () => { await api("/host/debian-mirrors", { preference: mirrorChoice }); setMirrors(null); });
+    await install(true);
   }
   async function enableGit() {
     await run(async () => { const next = await api("/host/git", { confirm: true }); setGit(next.ready ? null : next); });
@@ -221,6 +242,12 @@ function Initialization({ initial, onComplete }) {
             <div className="initialization-recovery"><button onClick={() => setStep("proxy")} disabled={busy}>检查 Cage 代理配置</button>{!progress && <button onClick={() => setDetails(true)}>查看操作详情</button>}</div>
           </>)}
         </div>
+        {mirrors && <section className="initialization-notice" aria-label="Debian 软件源"><h2>安装前，选择 Debian 软件源</h2><p>已经所选代理分别测量各软件源的下载速度。出口在海外时官方 CDN 通常更快；国内直连则国内镜像更快。</p>
+          <table className="mirror-samples"><tbody>{mirrors.samples.map(sample => <tr key={sample.id}><td>{sample.name}</td><td><code>{sample.host}</code></td><td>{sample.error ? <span className="mirror-error">{sample.error}</span> : formatSpeed(sample.bytes_per_second)}</td></tr>)}</tbody></table>
+          <label className="mirror-option"><input type="radio" name="debian-mirror" value="auto" checked={mirrorChoice === "auto"} onChange={() => setMirrorChoice("auto")} />国内镜像优先（南大、中科大，不可达时回到官方源）{mirrors.recommended === "auto" && <em>推荐</em>}</label>
+          <label className="mirror-option"><input type="radio" name="debian-mirror" value="official" checked={mirrorChoice === "official"} onChange={() => setMirrorChoice("official")} />Debian 官方源（deb.debian.org CDN）{mirrors.recommended === "official" && <em>推荐</em>}</label>
+          <p>选择会保存在设置中，之后的安装、更新和维护沿用；可在客机的 <code>/etc/claude-cage/debian-mirror</code> 中改回。</p>
+          <button className="primary" disabled={busy || !mirrorChoice} onClick={chooseMirror}>使用所选软件源并开始安装</button></section>}
         {git && <section className="initialization-notice" aria-label="Git 安全保护"><h2>安装前，保护本机 Git</h2><p>{git.message}</p>{git.can_enable && <><p>启用后，Git 会忽略未经你明确指定的裸仓库。该操作会修改当前用户的全局设置，影响本机其他 Git 工具，普通项目保持原有操作。</p><pre>git config --global safe.bareRepository explicit</pre><button className="primary" disabled={busy} onClick={enableGit}>启用 Git 保护</button></>}<button disabled={busy} onClick={install}>重新检查并安装</button></section>}
         {error && <p className="initialization-notice" role="alert"><SafetyMessage message={error} /></p>}
         <footer className="initialization-actions">
