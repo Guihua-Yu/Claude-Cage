@@ -30,6 +30,10 @@ type Preferences struct {
 	Keyboard              string `json:"keyboard"`
 	AutoTimezone          bool   `json:"auto_timezone"`
 	AutoLanguage          bool   `json:"auto_language"`
+	// DebianMirror is the APT source policy for Debian guests, chosen in the
+	// install dialog after measuring the sources through the proxy. Empty
+	// keeps the guest default ("auto": official first).
+	DebianMirror string `json:"debian_mirror,omitempty"`
 }
 
 const defaultBrowserHomeURL = "https://www.bing.com/"
@@ -183,6 +187,9 @@ func proposedSettings(input Settings, old cage.Config, profile string) (cage.Con
 	}
 	if input.Keyboard != "mac" && input.Keyboard != "native" {
 		return c, input.Preferences, errors.New("请选择 Mac 或原生 Linux 按键习惯")
+	}
+	if input.DebianMirror != "" && !cage.ValidDebianMirror(input.DebianMirror) {
+		return c, input.Preferences, errors.New("Debian 软件源只能选择官方优先、国内镜像优先或固定官方源")
 	}
 	p := input.Preferences
 	p.MobileRelay = strings.TrimSuffix(strings.TrimSpace(p.MobileRelay), "/")

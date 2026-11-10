@@ -405,6 +405,8 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("POST /api/environment/tools", s.updateEnvironmentTools)
 	mux.HandleFunc("GET /api/host/git", s.hostGit)
 	mux.HandleFunc("POST /api/host/git", s.enableHostGit)
+	mux.HandleFunc("GET /api/host/debian-mirrors", s.hostDebianMirrors)
+	mux.HandleFunc("POST /api/host/debian-mirrors", s.chooseDebianMirror)
 	mux.HandleFunc("GET /api/appearance", s.getAppearance)
 	mux.HandleFunc("GET /api/favorites", s.serveFavorites)
 	mux.HandleFunc("POST /api/favorites", s.serveFavorites)

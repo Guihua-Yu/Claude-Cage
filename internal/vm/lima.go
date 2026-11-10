@@ -330,7 +330,7 @@ func (l *Lima) Create(ctx context.Context, name, template string, s Settings, lo
 				e = append(e, ".images = "+string(images))
 				// cloud-init rewrites Debian's mirror list after bootcmd.
 				// Configure it immediately before Lima installs dependencies.
-				e = append(e, `.provision += [{"mode": "dependency", "script": `+strconv.Quote(cage.DebianPrepareScript)+`}]`)
+				e = append(e, `.provision += [{"mode": "dependency", "script": `+strconv.Quote(cage.DebianPrepareScriptFor(os.Getenv(cage.DebianMirrorEnv)))+`}]`)
 			}
 			tz, _ := json.Marshal(cfg.Timezone)
 			e = append(e, ".propagateProxyEnv = false", `.env = {"http_proxy":"","https_proxy":"","ftp_proxy":"","no_proxy":"","HTTP_PROXY":"","HTTPS_PROXY":"","FTP_PROXY":"","NO_PROXY":"","ALL_PROXY":"","all_proxy":""}`, ".timezone = "+string(tz))

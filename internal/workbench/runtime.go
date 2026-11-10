@@ -284,6 +284,12 @@ func (s *Server) runCage(args ...string) error {
 	if len(args) == 1 && args[0] == "setup" {
 		cmd.Env = append(cmd.Env, "CAGE_SETUP_PROGRESS=1")
 	}
+	s.mu.Lock()
+	mirror := s.preferences.DebianMirror
+	s.mu.Unlock()
+	if mirror != "" {
+		cmd.Env = append(cmd.Env, cage.DebianMirrorEnv+"="+mirror)
+	}
 	cmd.Env = append(cmd.Env, cage.JobEnv+"="+execution.id)
 	cmd.Stdout, cmd.Stderr = execution, execution
 	if err := cmd.Run(); err != nil {

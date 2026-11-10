@@ -10,7 +10,7 @@ import (
 
 func TestDebianMirrorFailureFallbackAndPreference(t *testing.T) {
 	old := "https://mirrors.nju.edu.cn/debian\tpriority:1\nhttps://mirrors.ustc.edu.cn/debian\tpriority:2\nhttps://deb.debian.org/debian\tpriority:3\n"
-	for _, mode := range []string{"reachable", "bookworm", "tls-failure", "official-failure", "nju-failure", "official", "custom", "old", "reboot", "invalid"} {
+	for _, mode := range []string{"reachable", "bookworm", "tls-failure", "official-failure", "nju-failure", "official", "custom", "old", "reboot", "invalid", "domestic", "env-domestic", "env-invalid"} {
 		t.Run(mode, func(t *testing.T) {
 			dir := t.TempDir()
 			mirrors := filepath.Join(dir, "mirrors")
@@ -29,7 +29,7 @@ func TestDebianMirrorFailureFallbackAndPreference(t *testing.T) {
 			os.WriteFile(list, []byte(content), 0644)
 			os.WriteFile(filepath.Join(mirrors, "debian-security.list"), []byte("https://deb.debian.org/debian-security\n"), 0644)
 			preference := filepath.Join(dir, "preference")
-			if mode == "official" || mode == "invalid" {
+			if mode == "official" || mode == "invalid" || mode == "domestic" {
 				os.WriteFile(preference, []byte(mode+"\n"), 0644)
 			}
 			for name, body := range map[string]string{
@@ -62,10 +62,16 @@ exit 0
 			run := func() ([]byte, error) {
 				cmd := exec.Command("sh", "-c", script)
 				cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "FIXTURE="+dir, "MODE="+mode)
+				switch mode {
+				case "env-domestic":
+					cmd.Env = append(cmd.Env, DebianMirrorEnv+"=domestic")
+				case "env-invalid":
+					cmd.Env = append(cmd.Env, DebianMirrorEnv+"=fastest")
+				}
 				return cmd.CombinedOutput()
 			}
 			out, err := run()
-			if mode == "invalid" {
+			if mode == "invalid" || mode == "env-invalid" {
 				if err == nil {
 					t.Fatal("invalid preference accepted")
 				}
@@ -90,8 +96,20 @@ exit 0
 					t.Fatal(got)
 				}
 			default:
-				if !strings.Contains(got, "mirrors.nju") {
+				// official-failure, domestic and env-domestic: mirrors first, official last.
+				if !strings.HasPrefix(got, "# Cage managed Debian mirrors\nhttps://mirrors.nju") || !strings.HasSuffix(strings.TrimSpace(got), "https://deb.debian.org/debian\tpriority:3") {
 					t.Fatal(got)
+				}
+			}
+			if mode == "domestic" || mode == "env-domestic" {
+				if probes, _ := os.ReadFile(filepath.Join(dir, "probes")); strings.Contains(string(probes), "deb.debian.org") {
+					t.Fatal("domestic preference probed the official source first")
+				}
+			}
+			if mode == "env-domestic" {
+				// The host's measured choice is kept for later runs without the variable.
+				if saved, _ := os.ReadFile(preference); strings.TrimSpace(string(saved)) != "domestic" {
+					t.Fatalf("host choice not persisted: %q", saved)
 				}
 			}
 			if mode == "official" {

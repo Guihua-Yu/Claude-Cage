@@ -223,7 +223,27 @@ var APTBootstrapScript = "set -e\nsudo env APT_CONFIG=\"${CAGE_APT_CONFIG:-/dev/
 
 // DebianPrepareScript runs before Lima's own dependency installation as well
 // as Cage setup. Its version check also covers previously created guests.
-var DebianPrepareScript = "#!/bin/sh\n" + APTBootstrapScript + "\n" + DebianMirrorsScript
+var DebianPrepareScript = DebianPrepareScriptFor("")
+
+// DebianMirrorEnv carries the host's Debian source choice into the cage CLI
+// and from there into the guest scripts.
+const DebianMirrorEnv = "CAGE_DEBIAN_MIRROR"
+
+// ValidDebianMirror reports whether preference names a Debian source policy:
+// "auto" (official first), "domestic" (mirrors first) or "official" (pinned).
+func ValidDebianMirror(preference string) bool {
+	return preference == "auto" || preference == "official" || preference == "domestic"
+}
+
+// DebianPrepareScriptFor pins the source policy for this run. An empty or
+// unknown preference keeps the guest's saved choice or its default probe.
+func DebianPrepareScriptFor(preference string) string {
+	export := ""
+	if ValidDebianMirror(preference) {
+		export = "export " + DebianMirrorEnv + "=" + preference + "\n"
+	}
+	return "#!/bin/sh\n" + export + APTBootstrapScript + "\n" + DebianMirrorsScript
+}
 
 //go:embed chromium-download.py
 var chromiumDownload string
