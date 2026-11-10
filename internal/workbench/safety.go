@@ -65,6 +65,9 @@ type guestObservation struct {
 	LCAll               string             `json:"lc_all"`
 	SystemTimezone      string             `json:"system_timezone"`
 	LocaleValid         bool               `json:"locale_valid"`
+	LocaltimeTarget     string             `json:"localtime_target,omitempty"`
+	UTCOffsetExpected   *int               `json:"utc_offset_expected,omitempty"`
+	UTCOffsetActual     *int               `json:"utc_offset_actual,omitempty"`
 	PublicConnected     bool               `json:"public_connected"`
 	ManagementConnected bool               `json:"management_connected"`
 	IPv6Connected       bool               `json:"ipv6_connected"`
@@ -342,7 +345,49 @@ func (s *Server) browserExitObservation(ctx context.Context, cfg cage.Config) (b
 }
 
 func guestSettingsMatch(v guestObservation, cfg cage.Config) bool {
-	return v.LocaleValid && v.TZ == cfg.Timezone && v.SystemTimezone == cfg.Timezone && v.Lang == cfg.Locale && v.LCAll == cfg.Locale
+	return linuxGuestSettingsMismatch(v, cfg) == ""
+}
+
+// linuxGuestSettingsMismatch names every configured value the Linux guest did
+// not read back. Besides the variables and /etc/timezone it requires the UTC
+// offset programs actually observe, so a stale /etc/localtime or missing
+// tzdata cannot hide behind a correct TZ variable.
+func linuxGuestSettingsMismatch(v guestObservation, cfg cage.Config) string {
+	var mismatches []string
+	if !v.LocaleValid {
+		mismatches = append(mismatches, "系统语言环境无法加载")
+	}
+	if v.TZ != cfg.Timezone {
+		mismatches = append(mismatches, fmt.Sprintf("TZ 变量不一致（期望 %q，实际 %q）", cfg.Timezone, v.TZ))
+	}
+	if v.SystemTimezone != cfg.Timezone {
+		mismatches = append(mismatches, fmt.Sprintf("系统时区文件不一致（期望 %q，实际 %q）", cfg.Timezone, v.SystemTimezone))
+	}
+	if v.Lang != cfg.Locale {
+		mismatches = append(mismatches, fmt.Sprintf("LANG 不一致（期望 %q，实际 %q）", cfg.Locale, v.Lang))
+	}
+	if v.LCAll != cfg.Locale {
+		mismatches = append(mismatches, fmt.Sprintf("LC_ALL 不一致（期望 %q，实际 %q）", cfg.Locale, v.LCAll))
+	}
+	if issue := effectiveTimezoneIssue(v, cfg); issue != "" {
+		mismatches = append(mismatches, issue)
+	}
+	return strings.Join(mismatches, "；")
+}
+
+func effectiveTimezoneIssue(v guestObservation, cfg cage.Config) string {
+	if v.UTCOffsetExpected == nil || v.UTCOffsetActual == nil {
+		return "未读到客机的实际 UTC 偏移"
+	}
+	if *v.UTCOffsetExpected != *v.UTCOffsetActual {
+		return fmt.Sprintf("实际 UTC 偏移与时区不一致（期望 %+d 秒，实际 %+d 秒）", *v.UTCOffsetExpected, *v.UTCOffsetActual)
+	}
+	// guest-env.sh links /etc/localtime to the zone; a regular file is left to
+	// the offset comparison above.
+	if v.LocaltimeTarget != "" && v.LocaltimeTarget != "/usr/share/zoneinfo/"+cfg.Timezone {
+		return "系统本地时间链接未指向已应用的时区"
+	}
+	return ""
 }
 func browserSettingsMatch(v browserObservation, cfg cage.Config) bool {
 	return browserSettingsMismatch(v, cfg) == ""
@@ -626,6 +671,7 @@ func (s *Server) runSafetyCheck() (returned error) {
 	port, _ := strconv.Atoi(control.Port())
 	s.setMessage("正在验证离线约束、共享文件与系统配置…")
 	boundaryInput := boundaryProbeInput(port, report.ID, private.Name(), shared.Name(), challenge)
+	boundaryInput["timezone"] = cfg.Timezone
 	if s.windowsGuest != nil {
 		if err := s.windowsBoundaryInput(shareRoot, private.Name(), shared.Name(), challenge, boundaryInput); err != nil {
 			return err
@@ -645,10 +691,19 @@ func (s *Server) runSafetyCheck() (returned error) {
 		return err
 	}
 	if boundaryErr == nil {
+		linuxGuest := s.windowsGuest == nil && s.macosGuest == nil
 		if s.guestSettingsOK(boundary, cfg) {
-			set("guest_settings", cage.CheckPassed, "客机进程与系统的时区和语言读回结果符合已应用配置", "")
+			evidence := "客机进程与系统的时区和语言读回结果符合已应用配置"
+			if linuxGuest {
+				evidence += "；实际 UTC 偏移与系统本地时间链接指向同一时区"
+			}
+			set("guest_settings", cage.CheckPassed, evidence, "")
 		} else {
-			set("guest_settings", cage.CheckFailed, "系统读回结果与已应用配置不一致", "重新应用时区与语言后重启环境")
+			evidence := "系统读回结果与已应用配置不一致"
+			if detail := linuxGuestSettingsMismatch(boundary, cfg); linuxGuest && detail != "" {
+				evidence += "：" + detail
+			}
+			set("guest_settings", cage.CheckFailed, evidence, "重新应用时区与语言后重启环境")
 		}
 		_, _ = shared.Seek(0, io.SeekStart)
 		sharedData, _ := io.ReadAll(io.LimitReader(shared, 256))
@@ -915,7 +970,7 @@ func (s *Server) monitorSafetyWithProbe(probe func(context.Context, cage.Config)
 		}
 	}
 	if issue == "" {
-		guest, e := s.guestObservation(ctx, map[string]any{"stage": "environment"})
+		guest, e := s.guestObservation(ctx, map[string]any{"stage": "environment", "timezone": cfg.Timezone})
 		timing.stage("guest_settings")
 		if e != nil || !s.guestSettingsOK(guest, cfg) {
 			issue = "系统时区或语言的运行状态无法确认，请重新检测"

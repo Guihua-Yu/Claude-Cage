@@ -7,6 +7,7 @@ from pathlib import Path
 import socket
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -42,6 +43,25 @@ def probe(path):
         return {"status": 0}
 
 
+def timezone_observation(expected):
+    # The environment variable and /etc/timezone are configuration; the
+    # effective UTC offset and the /etc/localtime link are what programs use.
+    observation = {"localtime_target": "", "utc_offset_actual": time.localtime().tm_gmtoff}
+    try:
+        observation["localtime_target"] = os.readlink("/etc/localtime")
+    except OSError:
+        pass
+    if expected:
+        try:
+            from datetime import datetime, timezone
+            from zoneinfo import ZoneInfo
+            offset = datetime.now(timezone.utc).astimezone(ZoneInfo(expected)).utcoffset()
+            observation["utc_offset_expected"] = int(offset.total_seconds())
+        except Exception:  # unknown zone, missing tzdata or zoneinfo module
+            pass
+    return observation
+
+
 if args["stage"] in ("boundary", "environment"):
     result.update(tz=os.environ.get("TZ", ""), lang=os.environ.get("LANG", ""), lc_all=os.environ.get("LC_ALL", ""))
     try:
@@ -50,6 +70,7 @@ if args["stage"] in ("boundary", "environment"):
         result["locale_valid"] = True
     except (OSError, locale.Error):
         result["locale_valid"] = False
+    result.update(timezone_observation(args.get("timezone", "")))
 
 if args["stage"] == "boundary":
     result["public_connected"] = connected(("1.1.1.1", 443))
